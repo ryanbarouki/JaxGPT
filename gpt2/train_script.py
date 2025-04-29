@@ -5,12 +5,13 @@ import optax
 import optax.losses as ll
 from flax.training import train_state
 import dataloader as dl
+import time
 
 # Create a train state
 def create_train_state(model, init_key, learning_rate):
   dummy = jnp.ones((1,1), dtype=int)
   params = model.init(init_key, dummy)
-  optimizer = optax.adamw(learning_rate)
+  optimizer = optax.adamw(learning_rate, b1=0.9, b2=0.95, eps=1e-8, weight_decay=0.1)
 
   return train_state.TrainState.create(
       apply_fn=model.apply,
@@ -31,8 +32,14 @@ def train_step(state, x, y):
 
 
 if __name__ == "__main__":
+    # TODO
+    # - Gradient norm clipping
+    # - Learning rate scheduler (cosine: max_lr: 6e-4, min_lr = max_lr*0.1, warmup_steps = 10, max_steps = 50)
+    # - gradient accumulation so that we match the effective batch size used by GPT2 of 0.5M tokens
+    # - JAXify the loops
+
     # Get model definition
-    config = nn.Config()
+    config = nn.Config(vocab_size=50304)
     model = nn.GPT2(config)
 
     # Initialise model and training state
@@ -41,8 +48,13 @@ if __name__ == "__main__":
     state = create_train_state(model, init_key, learning_rate=3e-4)
 
     # Training LOOP
-    loader = dl.DataLoaderLite(B=4, T=32, fname='../data/input.txt')
-    for i in range(100):
+    loader = dl.DataLoaderLite(B=16, T=1024, fname='../data/input.txt')
+    for i in range(50):
+        t0 = time.time()
         x,y = loader.next_batch()
         state, loss = train_step(state, x, y)
-        print(f"Iter: {i}, loss: {loss}")
+        jax.block_until_ready(state)
+        t1 = time.time()
+        dt = (t1 - t0)*1000
+        tokens_per_sec = (loader.B * loader.T) / (t1 - t0)
+        print(f"Step: {i}, Loss: {loss}, dt: {dt:.2f}ms, tok/sec: {tokens_per_sec}")

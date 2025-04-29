@@ -37,11 +37,15 @@ class MultiHeadAttention(nn.Module):
         k = jnp.reshape(k, (B, T, self.n_head, C // self.n_head)).swapaxes(1,2) # (B, nh, T, hs)
         v = jnp.reshape(v, (B, T, self.n_head, C // self.n_head)).swapaxes(1,2) # (B, nh, T, hs)
 
-        att = (q @ k.swapaxes(-2, -1)) / math.sqrt(k.shape[-1]) # (B, nh, T, T)
-        mask = self.causal_mask[:,:,:T,:T] 
-        att = jnp.where(~mask, -jnp.inf, att)
-        att = nn.softmax(att, axis=-1)
-        y = att @ v # (B, nh, T, T) @ (B, nh, T, hs) ---> (B, nh, T, hs)
+        # My implementation
+        # att = (q @ k.swapaxes(-2, -1)) / math.sqrt(k.shape[-1]) # (B, nh, T, T)
+        # mask = self.causal_mask[:,:,:T,:T] 
+        # att = jnp.where(~mask, -jnp.inf, att)
+        # att = nn.softmax(att, axis=-1)
+        # y = att @ v # (B, nh, T, T) @ (B, nh, T, hs) ---> (B, nh, T, hs)
+
+        # Fused kernel
+        y = jax.nn.dot_product_attention(q,k,v, is_causal=True) 
         y = y.swapaxes(1,2).reshape(B, T, C) # (B, T, nh, hs) -> (B, T, C)
         y = self.c_proj(y)
         return y
